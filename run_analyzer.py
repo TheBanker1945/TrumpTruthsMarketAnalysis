@@ -27,10 +27,10 @@ def main():
     print(f"Mode: {'Test' if args.test else 'Continuous'}")
     print("=" * 50)
     
-    # Check for OpenAI key
-    if not os.getenv('OPENAI_KEY'):
-        print("❌ ERROR: OPENAI_KEY not found in environment")
-        print("Please set OPENAI_KEY in your .env file")
+    # Check for Anthropic API key
+    if not os.getenv('ANTHROPIC_API_KEY'):
+        print("❌ ERROR: ANTHROPIC_API_KEY not found in environment")
+        print("Please set ANTHROPIC_API_KEY in your .env file")
         return
     
     if args.test:

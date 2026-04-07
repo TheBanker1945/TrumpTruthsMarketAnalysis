@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-TruthSocial RSS Scraper with OpenAI Analysis
-Monitors Donald Trump's posts and analyzes them for market impact using OpenAI
+TruthSocial RSS Scraper with Claude Analysis
+Monitors Donald Trump's posts and analyzes them for market impact using Anthropic Claude
 """
 
 import feedparser
@@ -13,7 +13,7 @@ from typing import List, Dict, Optional
 import re
 import os
 from dotenv import load_dotenv
-from openai import OpenAI
+import anthropic
 import requests
 
 # Load environment variables
@@ -37,9 +37,9 @@ class TruthSocialAnalyzer:
         self.posts_file = 'seen_posts_analyzer.json'
         self.analysis_file = 'post_analyses.json'
         
-        # Initialize OpenAI client
-        self.openai_client = None
-        self.init_openai()
+        # Initialize Anthropic client
+        self.anthropic_client = None
+        self.init_anthropic()
         
         # Initialize Telegram bot
         self.telegram_bot_token = None
@@ -50,19 +50,19 @@ class TruthSocialAnalyzer:
         self.load_seen_posts()
         self.load_analyses()
     
-    def init_openai(self):
-        """Initialize OpenAI client"""
-        api_key = os.getenv('OPENAI_KEY')
+    def init_anthropic(self):
+        """Initialize Anthropic client"""
+        api_key = os.getenv('ANTHROPIC_API_KEY')
         if not api_key:
-            logger.error("OPENAI_KEY not found in environment variables")
-            logger.error("Please set OPENAI_KEY in your .env file")
+            logger.error("ANTHROPIC_API_KEY not found in environment variables")
+            logger.error("Please set ANTHROPIC_API_KEY in your .env file")
             return
-        
+
         try:
-            self.openai_client = OpenAI(api_key=api_key)
-            logger.info("✅ OpenAI client initialized successfully")
+            self.anthropic_client = anthropic.Anthropic(api_key=api_key)
+            logger.info("✅ Anthropic client initialized successfully")
         except Exception as e:
-            logger.error(f"Failed to initialize OpenAI client: {e}")
+            logger.error(f"Failed to initialize Anthropic client: {e}")
     
     def init_telegram(self):
         """Initialize Telegram bot"""
@@ -188,41 +188,40 @@ class TruthSocialAnalyzer:
         
         return None
     
-    def analyze_post_with_openai(self, post_text: str) -> Optional[str]:
-        """Analyze post using OpenAI"""
-        if not self.openai_client:
-            logger.error("OpenAI client not initialized")
+    def analyze_post_with_claude(self, post_text: str) -> Optional[str]:
+        """Analyze post using Anthropic Claude"""
+        if not self.anthropic_client:
+            logger.error("Anthropic client not initialized")
             return None
-        
-        prompt = f"""You are an expert geopolitical and financial markets analyst.  
-You will be given a social media post written by Donald Trump.  
+
+        prompt = f"""You will be given a social media post written by Donald Trump.
 Your job is to evaluate its potential market impact and produce a structured analysis.
 
 Follow this framework exactly:
 
 ---
-**Analysis:**  
-- Market Impact: [Yes/No]  
+**Analysis:**
+- Market Impact: [Yes/No]
 
-- Equities: [Positive / Negative / Neutral / Uncertain]  
-  - Which sectors/industries are affected? Why?  
+- Equities: [Positive / Negative / Neutral / Uncertain]
+  - Which sectors/industries are affected? Why?
 
-- Commodities: [Positive / Negative / Neutral / Uncertain]  
-  - Which commodities are affected (e.g., oil, gold, rare earths, agriculture)? Why?  
+- Commodities: [Positive / Negative / Neutral / Uncertain]
+  - Which commodities are affected (e.g., oil, gold, rare earths, agriculture)? Why?
 
-- Foreign Exchange (FX): [Positive / Negative / Neutral / Uncertain]  
-  - Which currencies are affected (e.g., USD, CNY, EUR, JPY)? Why?  
+- Foreign Exchange (FX): [Positive / Negative / Neutral / Uncertain]
+  - Which currencies are affected (e.g., USD, CNY, EUR, JPY)? Why?
 
-- Bonds / Interest Rates: [Positive / Negative / Neutral / Uncertain]  
-  - Impact on Treasuries, yields, risk sentiment?  
+- Bonds / Interest Rates: [Positive / Negative / Neutral / Uncertain]
+  - Impact on Treasuries, yields, risk sentiment?
 
-- Crypto: [Positive / Negative / Neutral / Uncertain]  
-  - Does the post indirectly impact crypto markets (risk-on/off sentiment, regulation, etc.)?  
+- Crypto: [Positive / Negative / Neutral / Uncertain]
+  - Does the post indirectly impact crypto markets (risk-on/off sentiment, regulation, etc.)?
 
-- Reasoning: [Concise explanation of why these impacts are expected.]  
+- Reasoning: [Concise explanation of why these impacts are expected.]
 ---
 
-If no material impact is expected, state clearly:  
+If no material impact is expected, state clearly:
 "**No material market impact expected.**"
 
 Post to analyze:
@@ -230,25 +229,24 @@ Post to analyze:
 """
 
         try:
-            logger.info("🤖 Analyzing post with OpenAI...")
-            response = self.openai_client.chat.completions.create(
-                model="gpt-4",
-                messages=[
-                    {"role": "system", "content": "You are an expert geopolitical and financial markets analyst."},
-                    {"role": "user", "content": prompt}
-                ],
+            logger.info("🤖 Analyzing post with Claude...")
+            response = self.anthropic_client.messages.create(
+                model="claude-sonnet-4-6",
+                system="You are an expert geopolitical and financial markets analyst.",
                 max_tokens=500,
-                temperature=0.3
+                messages=[
+                    {"role": "user", "content": prompt}
+                ]
             )
-            
-            analysis = response.choices[0].message.content.strip()
-            logger.info("✅ OpenAI analysis completed")
+
+            analysis = response.content[0].text.strip()
+            logger.info("✅ Claude analysis completed")
             return analysis
-            
+
         except Exception as e:
-            logger.error(f"OpenAI analysis failed: {e}")
-            if "quota" in str(e).lower() or "billing" in str(e).lower():
-                logger.error("💳 OpenAI quota exceeded - please check your billing")
+            logger.error(f"Claude analysis failed: {e}")
+            if "credit" in str(e).lower() or "billing" in str(e).lower():
+                logger.error("💳 Anthropic credit issue - please check your billing")
             return None
     
     def send_telegram_message(self, post: Dict, analysis: str):
@@ -353,11 +351,11 @@ Post to analyze:
         print(post['text'])
         print(f"{'='*80}")
         
-        # Analyze with OpenAI
-        analysis = self.analyze_post_with_openai(post['text'])
-        
+        # Analyze with Claude
+        analysis = self.analyze_post_with_claude(post['text'])
+
         if analysis:
-            print(f"🤖 OPENAI MARKET ANALYSIS:")
+            print(f"🤖 CLAUDE MARKET ANALYSIS:")
             print(f"{'='*80}")
             print(analysis)
             print(f"{'='*80}")
@@ -407,7 +405,7 @@ Post to analyze:
                 print(f"\n--- Test Analysis {i+1} ---")
                 print(f"Post: {post_data['text'][:100]}...")
                 
-                analysis = self.analyze_post_with_openai(post_data['text'])
+                analysis = self.analyze_post_with_claude(post_data['text'])
                 if analysis:
                     print(f"Analysis: {analysis}")
                 else:
