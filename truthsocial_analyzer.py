@@ -249,6 +249,10 @@ Post to analyze:
                 logger.error("💳 Anthropic credit issue - please check your billing")
             return None
     
+    def has_market_impact(self, analysis: str) -> bool:
+        """Check if Claude's analysis indicates market impact"""
+        return bool(re.search(r'market\s+impact:\s*yes', analysis, re.IGNORECASE))
+
     def send_telegram_message(self, post: Dict, analysis: str):
         """Send post and analysis to Telegram using requests"""
         if not self.telegram_bot_token or not self.user_id:
@@ -371,8 +375,11 @@ Post to analyze:
             self.analyses.append(analysis_data)
             self.save_analyses()
             
-            # Send to Telegram
-            self.send_telegram_message(post, analysis)
+            # Only send to Telegram if the post has market impact
+            if self.has_market_impact(analysis):
+                self.send_telegram_message(post, analysis)
+            else:
+                logger.info(f"Post {post['id']} has no market impact, skipping Telegram notification")
         else:
             print(f"❌ Analysis failed")
         
