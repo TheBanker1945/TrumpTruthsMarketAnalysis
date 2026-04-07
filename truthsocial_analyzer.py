@@ -6,7 +6,6 @@ Monitors Donald Trump's posts and analyzes them for market impact using Anthropi
 
 import feedparser
 import time
-import json
 import logging
 from datetime import datetime
 from typing import List, Dict, Optional
@@ -15,18 +14,20 @@ import os
 from dotenv import load_dotenv
 import anthropic
 import requests
+import supabase_client
 
 # Load environment variables
 load_dotenv('.env')
 
 # Configure logging
+log_handlers = [logging.StreamHandler()]
+if os.environ.get('GITHUB_ACTIONS') is None:
+    log_handlers.append(logging.FileHandler('truthsocial_analyzer.log'))
+
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler('truthsocial_analyzer.log'),
-        logging.StreamHandler()
-    ]
+    handlers=log_handlers
 )
 logger = logging.getLogger(__name__)
 
@@ -34,21 +35,20 @@ class TruthSocialAnalyzer:
     def __init__(self, rss_url: str = "https://trumpstruth.org/feed"):
         self.rss_url = rss_url
         self.seen_posts = set()  # Track posts we've already seen
-        self.posts_file = 'seen_posts_analyzer.json'
-        self.analysis_file = 'post_analyses.json'
-        
+
         # Initialize Anthropic client
         self.anthropic_client = None
         self.init_anthropic()
-        
+
         # Initialize Telegram bot
         self.telegram_bot_token = None
         self.user_id = None
         self.init_telegram()
-        
-        # Load existing data
-        self.load_seen_posts()
-        self.load_analyses()
+
+        # Load existing data from Supabase
+        self.seen_posts = supabase_client.get_seen_posts('analyzer')
+        self.analyses = supabase_client.get_analyses()
+        logger.info(f"Loaded {len(self.seen_posts)} seen posts and {len(self.analyses)} analyses from Supabase")
     
     def init_anthropic(self):
         """Initialize Anthropic client"""
@@ -80,51 +80,6 @@ class TruthSocialAnalyzer:
             return
         
         logger.info("✅ Telegram bot credentials loaded successfully")
-    
-    def load_seen_posts(self):
-        """Load previously seen posts from file"""
-        try:
-            with open(self.posts_file, 'r') as f:
-                data = json.load(f)
-                self.seen_posts = set(data.get('seen_posts', []))
-                logger.info(f"Loaded {len(self.seen_posts)} previously seen posts")
-        except FileNotFoundError:
-            logger.info("No previous posts file found, starting fresh")
-        except Exception as e:
-            logger.error(f"Error loading seen posts: {e}")
-    
-    def save_seen_posts(self):
-        """Save seen posts to file"""
-        try:
-            data = {
-                'seen_posts': list(self.seen_posts),
-                'last_updated': datetime.now().isoformat()
-            }
-            with open(self.posts_file, 'w') as f:
-                json.dump(data, f, indent=2)
-        except Exception as e:
-            logger.error(f"Error saving seen posts: {e}")
-    
-    def load_analyses(self):
-        """Load previous analyses from file"""
-        try:
-            with open(self.analysis_file, 'r') as f:
-                self.analyses = json.load(f)
-                logger.info(f"Loaded {len(self.analyses)} previous analyses")
-        except FileNotFoundError:
-            self.analyses = []
-            logger.info("No previous analyses file found, starting fresh")
-        except Exception as e:
-            logger.error(f"Error loading analyses: {e}")
-            self.analyses = []
-    
-    def save_analyses(self):
-        """Save analyses to file"""
-        try:
-            with open(self.analysis_file, 'w') as f:
-                json.dump(self.analyses, f, indent=2)
-        except Exception as e:
-            logger.error(f"Error saving analyses: {e}")
     
     def fetch_rss_feed(self) -> Optional[feedparser.FeedParserDict]:
         """Fetch and parse the RSS feed"""
@@ -305,13 +260,25 @@ Post to analyze:
             if post_data and post_data['id'] not in self.seen_posts:
                 new_posts.append(post_data)
                 self.seen_posts.add(post_data['id'])
+                supabase_client.add_seen_post(post_data['id'], 'analyzer')
                 logger.info(f"New post found: {post_data['text'][:100]}...")
-        
-        if new_posts:
-            self.save_seen_posts()
-        
+
         return new_posts
     
+    def run_once(self):
+        """Run a single check cycle then exit (for scheduled/cron execution)"""
+        logger.info("Running single check cycle")
+        new_posts = self.check_for_new_posts()
+
+        if new_posts:
+            logger.info(f"Found {len(new_posts)} new post(s)")
+            for post in new_posts:
+                self.handle_new_post(post)
+        else:
+            logger.info("No new posts found")
+
+        logger.info("Single check cycle complete")
+
     def run_analyzer(self, interval: int = 30):
         """Run the analyzer continuously"""
         logger.info(f"Starting TruthSocial Analyzer")
@@ -337,8 +304,7 @@ Post to analyze:
         except Exception as e:
             logger.error(f"Unexpected error: {e}")
         finally:
-            self.save_seen_posts()
-            self.save_analyses()
+            logger.info("Analyzer shutting down")
     
     def handle_new_post(self, post: Dict):
         """Handle a new post - analyze and display"""
@@ -364,16 +330,22 @@ Post to analyze:
             print(analysis)
             print(f"{'='*80}")
             
-            # Save analysis
-            analysis_data = {
+            # Save analysis to Supabase
+            analyzed_at = datetime.now().isoformat()
+            supabase_client.add_analysis(
+                post_id=post['id'],
+                post_text=post['text'],
+                post_timestamp=post.get('timestamp'),
+                analysis=analysis,
+                analyzed_at=analyzed_at,
+            )
+            self.analyses.append({
                 'post_id': post['id'],
                 'post_text': post['text'],
                 'post_timestamp': post.get('timestamp'),
                 'analysis': analysis,
-                'analyzed_at': datetime.now().isoformat()
-            }
-            self.analyses.append(analysis_data)
-            self.save_analyses()
+                'analyzed_at': analyzed_at,
+            })
             
             # Only send to Telegram if the post has market impact
             if self.has_market_impact(analysis):

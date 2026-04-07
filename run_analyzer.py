@@ -18,13 +18,16 @@ def main():
                        help='Analysis interval in seconds (default: 30)')
     parser.add_argument('--test', action='store_true',
                        help='Run test mode instead of continuous monitoring')
-    
+    parser.add_argument('--once', action='store_true',
+                       help='Run a single check cycle then exit (for scheduled/cron execution)')
+
     args = parser.parse_args()
-    
+
+    mode = 'Test' if args.test else ('Single check' if args.once else 'Continuous')
     print("TruthSocial Analyzer")
     print("=" * 50)
     print(f"Interval: {args.interval} seconds")
-    print(f"Mode: {'Test' if args.test else 'Continuous'}")
+    print(f"Mode: {mode}")
     print("=" * 50)
     
     # Check for Anthropic API key
@@ -33,17 +36,15 @@ def main():
         print("Please set ANTHROPIC_API_KEY in your .env file")
         return
     
+    sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+    from truthsocial_analyzer import TruthSocialAnalyzer
+    analyzer = TruthSocialAnalyzer()
+
     if args.test:
-        # Import and run test
-        sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-        from truthsocial_analyzer import TruthSocialAnalyzer
-        analyzer = TruthSocialAnalyzer()
         analyzer.test_analyzer()
+    elif args.once:
+        analyzer.run_once()
     else:
-        # Import and run analyzer
-        sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-        from truthsocial_analyzer import TruthSocialAnalyzer
-        analyzer = TruthSocialAnalyzer()
         analyzer.run_analyzer(interval=args.interval)
 
 if __name__ == "__main__":

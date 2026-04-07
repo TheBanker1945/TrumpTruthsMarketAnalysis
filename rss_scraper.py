@@ -7,11 +7,11 @@ Much simpler and more reliable than web scraping!
 
 import feedparser
 import time
-import json
 import logging
 from datetime import datetime
 from typing import List, Dict, Optional
 import re
+import supabase_client
 
 # Configure logging
 logging.basicConfig(
@@ -27,33 +27,8 @@ logger = logging.getLogger(__name__)
 class TruthSocialRSSScraper:
     def __init__(self, rss_url: str = "https://trumpstruth.org/feed"):
         self.rss_url = rss_url
-        self.seen_posts = set()  # Track posts we've already seen
-        self.posts_file = 'seen_posts_rss.json'
-        self.load_seen_posts()
-    
-    def load_seen_posts(self):
-        """Load previously seen posts from file"""
-        try:
-            with open(self.posts_file, 'r') as f:
-                data = json.load(f)
-                self.seen_posts = set(data.get('seen_posts', []))
-                logger.info(f"Loaded {len(self.seen_posts)} previously seen posts")
-        except FileNotFoundError:
-            logger.info("No previous posts file found, starting fresh")
-        except Exception as e:
-            logger.error(f"Error loading seen posts: {e}")
-    
-    def save_seen_posts(self):
-        """Save seen posts to file"""
-        try:
-            data = {
-                'seen_posts': list(self.seen_posts),
-                'last_updated': datetime.now().isoformat()
-            }
-            with open(self.posts_file, 'w') as f:
-                json.dump(data, f, indent=2)
-        except Exception as e:
-            logger.error(f"Error saving seen posts: {e}")
+        self.seen_posts = supabase_client.get_seen_posts('rss')
+        logger.info(f"Loaded {len(self.seen_posts)} seen posts from Supabase")
     
     def fetch_rss_feed(self) -> Optional[feedparser.FeedParserDict]:
         """Fetch and parse the RSS feed"""
@@ -129,11 +104,9 @@ class TruthSocialRSSScraper:
             if post_data and post_data['id'] not in self.seen_posts:
                 new_posts.append(post_data)
                 self.seen_posts.add(post_data['id'])
+                supabase_client.add_seen_post(post_data['id'], 'rss')
                 logger.info(f"New post found: {post_data['text'][:100]}...")
-        
-        if new_posts:
-            self.save_seen_posts()
-        
+
         return new_posts
     
     def run_scraper(self, interval: int = 30):
@@ -161,7 +134,7 @@ class TruthSocialRSSScraper:
         except Exception as e:
             logger.error(f"Unexpected error: {e}")
         finally:
-            self.save_seen_posts()
+            logger.info("Scraper shutting down")
     
     def handle_new_post(self, post: Dict):
         """Handle a new post - customize this method for your needs"""
